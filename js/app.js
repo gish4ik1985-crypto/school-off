@@ -2,6 +2,7 @@ import * as L from './logic.js';
 import * as S from './store.js';
 import * as W from './week.js';
 import * as D from './diary.js';
+import * as G from './grades.js';
 import * as R from './remind.js';
 
 let state = S.load();
@@ -26,6 +27,7 @@ const TABS = [
   ['schedule', 'Расписание'],
   ['tasks', 'Задания'],
   ['grades', 'Оценки'],
+  ['totals', 'Итоги'],
   ['remarks', 'Замечания'],
 ];
 
@@ -46,6 +48,7 @@ let taskFilter = 'active';
 let gradeSubject = '';
 let diaryFrom = null; // понедельник недели в «Дневнике»; null = текущая
 let showSat = false;
+let totalsYear = null; // учебный год (год начала) во вкладке «Итоги»; null = текущий
 let weekFrom = null; // понедельник выбранной недели; null = текущая
 
 // ---------- Маршрутизация ----------
@@ -137,7 +140,7 @@ function childPage(c, tab) {
   const tabs = TABS.map(
     ([k, label]) => `<a class="tab ${k === tab ? 'active' : ''}" href="#/child/${c.id}/${k}">${label}</a>`,
   ).join('');
-  const body = { overview, diary: diaryTab, week: weekTab, practice: practiceTab, schedule: scheduleTab, tasks: tasksTab, grades: gradesTab, remarks: remarksTab }[tab] ?? overview;
+  const body = { overview, diary: diaryTab, week: weekTab, practice: practiceTab, schedule: scheduleTab, tasks: tasksTab, grades: gradesTab, totals: totalsTab, remarks: remarksTab }[tab] ?? overview;
   return `<div class="child-head">
       <a href="#/" class="back" aria-label="Назад">←</a>
       <span class="avatar">${esc(c.emoji)}</span>
@@ -414,6 +417,47 @@ function gradesTab(c) {
     ${items.length ? `<ul class="list">${items.map(gradeItem).join('')}</ul>` : '<p class="muted">Оценок нет.</p>'}`;
 }
 
+// --- Итоги: оценки по четвертям и годам ---
+
+const finalCls = (v) => (v === null ? '' : gradeCls(Math.round(v)));
+
+function totalsTab(c) {
+  const today = L.todayISO();
+  const cur = G.schoolYearOf(today);
+  totalsYear = totalsYear ?? cur;
+  const sum = G.periodSummary(state, c.id, totalsYear, state.settings.quarterEnds);
+  const range = (id) => (id === 'year' ? '' : `${L.formatDate(sum.ranges[id].from)}–${L.formatDate(sum.ranges[id].to)}`);
+  // дата для кнопки «+ оценка»: сегодня, если она внутри периода, иначе ближайшая граница периода
+  const dateFor = (id) => {
+    const { from, to } = sum.ranges[id];
+    return today < from ? from : today > to ? to : today;
+  };
+  const nav = `<div class="weeknav">
+      <button class="chip" data-act="totals-shift" data-value="-1" aria-label="Предыдущий учебный год">‹</button>
+      <strong>${G.yearLabel(totalsYear)} учебный год${totalsYear === cur ? ' <small>текущий</small>' : ''}</strong>
+      <button class="chip" data-act="totals-shift" data-value="1" aria-label="Следующий учебный год">›</button>
+      ${totalsYear === cur ? '' : '<button class="chip" data-act="totals-now">К текущему</button>'}
+    </div>`;
+  const head = G.PERIODS.map((p) => `<th>${p.name}<small>${range(p.id)}</small></th>`).join('');
+  const body = sum.rows
+    .map(
+      (r) => `<tr><th class="sname">${esc(r.subject.name)}</th>${G.PERIODS.map((p) => {
+        const x = r.cells[p.id];
+        const hint = x.avg !== null ? `<small class="muted">ср. ${x.avg} · ${x.count}</small>` : '';
+        return `<td class="fc ${x.final === null && x.avg !== null ? 'est' : ''}">
+          <select class="${finalCls(x.final)}" data-act="final-edit" data-child="${c.id}" data-subject="${r.subject.id}" data-year="${totalsYear}" data-period="${p.id}" aria-label="${esc(r.subject.name)}, ${p.name}">
+            <option value="">${x.final === null && x.avg !== null ? `≈${Math.round(x.avg)}` : '—'}</option>${[5, 4, 3, 2, 1].map((v) => `<option ${x.final === v ? 'selected' : ''}>${v}</option>`).join('')}
+          </select>${hint}${p.id === 'year' ? '' : `<button class="mini" data-act="grade-form" data-child="${c.id}" data-subject="${r.subject.id}" data-date="${dateFor(p.id)}" title="Добавить оценку за период" aria-label="Добавить оценку">+</button>`}
+        </td>`;
+      }).join('')}</tr>`,
+    )
+    .join('');
+  const foot = `<tr><th class="sname">Средний балл</th>${G.PERIODS.map((p) => `<td class="tot">${sum.totals[p.id] ?? '—'}</td>`).join('')}</tr>`;
+  return `${nav}
+    <div class="tscroll"><table class="totals"><thead><tr><th></th>${head}</tr></thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>
+    <p class="muted">В клетке — итоговая оценка за период: выберите её вручную (так можно проставить и за прошлые четверти и годы, даже без отдельных оценок). Если итоговой оценки нет, показано приблизительное значение «≈» по внесённым оценкам, под клеткой — средний балл и количество оценок. Кнопка «+» добавляет отдельную оценку в этот период.</p>`;
+}
+
 // --- Замечания ---
 
 function remarksTab(c) {
@@ -462,6 +506,7 @@ function settingsPage() {
       <button class="btn" data-act="subject-add">+ Добавить предмет</button>
     </section>
     ${remindSettings()}
+    ${quarterSettings()}
     <section>
       <h3>Резервная копия</h3>
       <p class="muted">Данные хранятся только в этом браузере, на этом устройстве. Сохраняйте копию время от времени — и так же можно перенести данные на другое устройство.</p>
@@ -487,7 +532,7 @@ const KINDS = {
   lesson: { list: 'schedule', title: ['Новый урок', 'Урок'] },
 };
 
-function formFields(kind, item, childId, day, date) {
+function formFields(kind, item, childId, day, date, subjectId) {
   const today = L.todayISO();
   if (kind === 'lesson') {
     const d = item?.day ?? day ?? 1;
@@ -512,12 +557,12 @@ function formFields(kind, item, childId, day, date) {
   }
   if (kind === 'grade') {
     const cur = item?.value ?? 5;
-    return `<label>Предмет<select name="subjectId" required>${subjectOptions(item?.subjectId)}</select></label>
+    return `<label>Предмет<select name="subjectId" required>${subjectOptions(item?.subjectId ?? subjectId)}</select></label>
       <fieldset class="values"><legend>Оценка</legend>${[5, 4, 3, 2, 1]
         .map((v) => `<label class="valbtn ${gradeCls(v)}"><input type="radio" name="value" value="${v}" ${v === cur ? 'checked' : ''} /><span>${v}</span></label>`)
         .join('')}</fieldset>
       <label>Вид работы<select name="kind">${L.GRADE_KINDS.map((k) => `<option ${k === (item?.kind ?? 'Классная работа') ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
-      <label>Дата<input type="date" name="date" value="${item?.date ?? today}" required /></label>
+      <label>Дата<input type="date" name="date" value="${item?.date ?? date ?? today}" required /></label>
       <label>Комментарий (необязательно)<textarea name="comment" rows="2">${esc(item?.comment ?? '')}</textarea></label>`;
   }
   return `<label>Тип<select name="type">${Object.entries(REMARK_TYPES)
@@ -529,7 +574,7 @@ function formFields(kind, item, childId, day, date) {
     <label>Текст<textarea name="text" rows="3" required>${esc(item?.text ?? '')}</textarea></label>`;
 }
 
-function openForm(kind, { id, childId, day, date } = {}) {
+function openForm(kind, { id, childId, day, date, subjectId } = {}) {
   const meta = KINDS[kind];
   const item = id ? state[meta.list].find((x) => x.id === id) : null;
   const cid = item?.childId ?? childId ?? route().id ?? state.children[0]?.id;
@@ -543,7 +588,7 @@ function openForm(kind, { id, childId, day, date } = {}) {
   dlg.innerHTML = `<form method="dialog" id="entry-form">
       <h3>${meta.title[item ? 1 : 0]}</h3>
       ${childSelect}
-      ${formFields(kind, item, cid, Number(day) || undefined, date || undefined)}
+      ${formFields(kind, item, cid, Number(day) || undefined, date || undefined, subjectId || undefined)}
       ${kind === 'lesson' ? '' : `<div class="field"><span>Фото (необязательно)</span>
         <label class="btn small">📷 Добавить фото<input type="file" accept="image/*" multiple hidden data-act="pick-photos" /></label>
         <div class="photos" id="form-photos"></div>
@@ -650,7 +695,7 @@ function submitChild(e) {
 async function deleteChild() {
   const c = form?.child;
   if (!c || !confirm(`Удалить ${c.name} вместе со всеми заданиями, оценками и замечаниями?`)) return;
-  for (const list of ['tasks', 'grades', 'remarks', 'schedule', 'practice']) {
+  for (const list of ['tasks', 'grades', 'remarks', 'schedule', 'finals']) {
     for (const rec of state[list].filter((x) => x.childId === c.id)) {
       for (const pid of rec.photoIds ?? []) await S.deletePhoto(pid).catch(() => {});
     }
@@ -689,6 +734,15 @@ function reminderBanner(today) {
   return `<section class="remind"><h3>🔔 Напоминания</h3><ul class="attention">${items
     .map((i) => `<li class="${i.level}"><a href="#/child/${i.childId}/${i.tab}">${multi ? `<b>${esc(i.child)}:</b> ` : ''}${esc(i.text)}</a></li>`)
     .join('')}</ul></section>`;
+}
+
+function quarterSettings() {
+  const names = ['1 четверти', '2 четверти', '3 четверти', '4 четверти (конец учебного года)'];
+  return `<section>
+      <h3>Четверти</h3>
+      <p class="muted">Нужны для вкладки «Итоги»: отсюда считается, в какую четверть попадает каждая оценка. Первая четверть начинается 1 сентября. Укажите даты окончания, как в вашей школе — день и месяц.</p>
+      ${state.settings.quarterEnds.map((md, i) => `<label>Конец ${names[i]}<input type="date" value="2000-${md}" data-act="quarter-end" data-i="${i}" /></label>`).join('')}
+    </section>`;
 }
 
 function remindSettings() {
@@ -737,6 +791,30 @@ dlg.addEventListener('cancel', () => form?.pending?.forEach((p) => URL.revokeObj
 
 document.addEventListener('change', async (e) => {
   const act = e.target.dataset.act;
+  if (act === 'final-edit') {
+    const d = e.target.dataset;
+    const r = G.setFinal(state, { childId: d.child, subjectId: d.subject, year: Number(d.year), period: d.period, value: e.target.value }, S.uid);
+    if (r.blocked) {
+      alert(r.blocked);
+      render();
+      return;
+    }
+    S.save(state);
+    render(); // пересчитать итоговую строку и цвет
+    return;
+  }
+  if (act === 'quarter-end') {
+    const ends = [...state.settings.quarterEnds];
+    ends[Number(e.target.dataset.i)] = e.target.value.slice(5);
+    if (!G.validEnds(ends)) {
+      alert('Границы четвертей должны идти по порядку в течение учебного года (с сентября по май), например 31.10, 31.12, 31.03, 31.05.');
+      render();
+      return;
+    }
+    state.settings.quarterEnds = ends;
+    commit();
+    return;
+  }
   if (act === 'hw-edit') {
     const { child, subject, date } = e.target.dataset;
     const r = D.saveHomework(state, { childId: child, subjectId: subject, date, text: e.target.value }, S.uid);
@@ -816,7 +894,7 @@ document.addEventListener('click', async (e) => {
     case 'child-form': openChildForm(id); break;
     case 'delete-child': await deleteChild(); break;
     case 'task-form': openForm('task', { id, childId: child, date: el.dataset.date }); break;
-    case 'grade-form': openForm('grade', { id, childId: child }); break;
+    case 'grade-form': openForm('grade', { id, childId: child, date: el.dataset.date, subjectId: el.dataset.subject }); break;
     case 'remark-form': openForm('remark', { id, childId: child, date: el.dataset.date }); break;
     case 'week-shift': weekFrom = L.addDays(weekFrom ?? W.weekStart(L.todayISO()), 7 * Number(value)); render(); break;
     case 'week-now': weekFrom = null; render(); break;
@@ -890,6 +968,8 @@ document.addEventListener('click', async (e) => {
       break;
     case 'diary-shift': diaryFrom = L.addDays(diaryFrom ?? W.weekStart(L.todayISO()), 7 * Number(value)); render(); break;
     case 'diary-now': diaryFrom = null; render(); break;
+    case 'totals-shift': totalsYear = (totalsYear ?? G.schoolYearOf(L.todayISO())) + Number(value); render(); break;
+    case 'totals-now': totalsYear = null; render(); break;
     case 'toggle-sat': showSat = !showSat; render(); break;
     case 'hw-status': {
       const t = state.tasks.find((x) => x.id === id);

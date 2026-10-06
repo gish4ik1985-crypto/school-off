@@ -1,6 +1,8 @@
 // Хранилище в браузере: данные — localStorage, фотографии — IndexedDB.
 // Ничего не уходит в сеть.
 
+import { DEFAULT_ENDS, normalizeEnds } from './grades.js';
+
 const KEY = 'school-off:v1';
 const DB_NAME = 'school-off-photos';
 const STORE = 'photos';
@@ -31,6 +33,8 @@ export function defaultState() {
     grades: [],
     remarks: [],
     schedule: [],
+    finals: [],
+    settings: { quarterEnds: [...DEFAULT_ENDS] },
   };
 }
 
@@ -45,6 +49,8 @@ export function normalize(raw) {
     grades: Array.isArray(raw.grades) ? raw.grades : [],
     remarks: Array.isArray(raw.remarks) ? raw.remarks : [],
     schedule: Array.isArray(raw.schedule) ? raw.schedule : [],
+    finals: Array.isArray(raw.finals) ? raw.finals : [],
+    settings: { quarterEnds: normalizeEnds(raw.settings?.quarterEnds) },
   };
 }
 
