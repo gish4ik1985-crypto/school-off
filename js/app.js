@@ -64,10 +64,9 @@ function render() {
   photoUrls = [];
   let html;
   if (r.page === 'child' && childById(r.id)) html = childPage(childById(r.id), r.tab);
-  else if (r.page === 'settings') html = settingsPage();
+  else if (r.page === 'settings') html = `<div class="narrow">${settingsPage()}</div>`;
   else html = homePage();
   root.innerHTML = html;
-  root.classList.toggle('wide', r.page === 'child' && ['diary', 'schedule'].includes(r.tab));
   hydratePhotos();
   document.title = 'Школьный помощник';
 }
@@ -97,7 +96,7 @@ function homePage() {
     </section>`;
   }
   const today = L.todayISO();
-  return `${reminderBanner(today)}<div class="cards">${state.children
+  return `<div class="narrow">${reminderBanner(today)}</div><div class="cards">${state.children
     .map((c) => {
       const tasks = state.tasks.filter((t) => t.childId === c.id);
       const nToday = tasks.filter((t) => L.taskStatus(t, today) === 'today').length;
@@ -148,7 +147,7 @@ function childPage(c, tab) {
       <button class="chip edit-name" data-act="child-form" data-id="${c.id}" aria-label="Изменить имя и класс" title="Изменить имя и класс">✏️</button>
     </div>
     <nav class="tabs">${tabs}</nav>
-    ${body(c)}`;
+    <div class="tabbody ${['diary', 'schedule'].includes(tab) ? '' : 'narrow'}">${body(c)}</div>`;
 }
 
 function sparkline(values) {
