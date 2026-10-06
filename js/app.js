@@ -1,8 +1,7 @@
 import * as L from './logic.js';
 import * as S from './store.js';
 import * as W from './week.js';
-import * as AI from './ai.js';
-import * as M from './aimap.js';
+import * as D from './diary.js';
 import * as R from './remind.js';
 
 let state = S.load();
@@ -21,6 +20,7 @@ const REMARK_TYPES = {
 };
 const TABS = [
   ['overview', 'Обзор'],
+  ['diary', 'Дневник'],
   ['week', 'Неделя'],
   ['practice', 'Подтянуть'],
   ['schedule', 'Расписание'],
@@ -44,6 +44,8 @@ const subjectOptions = (selected, withEmpty) =>
 let photoUrls = [];
 let taskFilter = 'active';
 let gradeSubject = '';
+let diaryFrom = null; // понедельник недели в «Дневнике»; null = текущая
+let showSat = false;
 let weekFrom = null; // понедельник выбранной недели; null = текущая
 
 // ---------- Маршрутизация ----------
@@ -62,6 +64,7 @@ function render() {
   else if (r.page === 'settings') html = settingsPage();
   else html = homePage();
   root.innerHTML = html;
+  root.classList.toggle('wide', r.page === 'child' && ['diary', 'schedule'].includes(r.tab));
   hydratePhotos();
   document.title = 'Школьный помощник';
 }
@@ -113,7 +116,6 @@ function homePage() {
           <button class="chip" data-act="task-form" data-child="${c.id}">+ Задание</button>
           <button class="chip" data-act="grade-form" data-child="${c.id}">+ Оценка</button>
           <button class="chip" data-act="remark-form" data-child="${c.id}">+ Замечание</button>
-          <button class="chip" data-act="diary-form" data-child="${c.id}">📷 Из дневника</button>
           <a class="chip" href="#/child/${c.id}/week">📊 Сводка недели</a>
           <a class="chip" href="#/child/${c.id}/practice">🎯 Подтянуть</a>
         </div>
@@ -135,7 +137,7 @@ function childPage(c, tab) {
   const tabs = TABS.map(
     ([k, label]) => `<a class="tab ${k === tab ? 'active' : ''}" href="#/child/${c.id}/${k}">${label}</a>`,
   ).join('');
-  const body = { overview, week: weekTab, practice: practiceTab, schedule: scheduleTab, tasks: tasksTab, grades: gradesTab, remarks: remarksTab }[tab] ?? overview;
+  const body = { overview, diary: diaryTab, week: weekTab, practice: practiceTab, schedule: scheduleTab, tasks: tasksTab, grades: gradesTab, remarks: remarksTab }[tab] ?? overview;
   return `<div class="child-head">
       <a href="#/" class="back" aria-label="Назад">←</a>
       <span class="avatar">${esc(c.emoji)}</span>
@@ -250,16 +252,24 @@ function weekTab(c) {
 
 // --- Расписание ---
 
+const lessonOptions = (selected) => '<option value="">—</option>' + state.subjects.map((s) => `<option value="${s.id}" ${s.id === selected ? 'selected' : ''}>${esc(s.name)}</option>`).join('');
+
 function scheduleTab(c) {
   const today = L.dow(L.todayISO());
   const mine = state.schedule.filter((l) => l.childId === c.id);
-  const days = [1, 2, 3, 4, 5].concat(mine.some((l) => l.day === 6) ? [6] : []);
-  return `<div class="toolbar"><span class="muted">Уроки на неделю</span>
-      <button class="btn primary" data-act="lesson-form" data-child="${c.id}">+ Урок</button></div>
-    <div class="week">${days
-      .map((d) => {
-        const ls = mine.filter((l) => l.day === d).sort((a, b) => a.num - b.num);
-        return `<section class="day ${d === today ? 'today' : ''}">
+  const withSat = showSat || mine.some((l) => l.day === 6);
+  const days = [1, 2, 3, 4, 5].concat(withSat ? [6] : []);
+  const rows = Math.max(8, ...mine.map((l) => l.num));
+  const at = (d, n) => mine.find((l) => l.day === d && l.num === n);
+  const grid = `<table class="sgrid">
+      <thead><tr><th></th>${days.map((d) => `<th class="${d === today ? 'today' : ''}">${L.DAY_NAMES[d]}</th>`).join('')}</tr></thead>
+      <tbody>${Array.from({ length: rows }, (_, i) => i + 1)
+        .map((n) => `<tr><th>${n}</th>${days.map((d) => `<td><select data-act="lesson-cell" data-child="${c.id}" data-day="${d}" data-num="${n}" aria-label="${L.DAY_NAMES[d]}, урок ${n}">${lessonOptions(at(d, n)?.subjectId)}</select></td>`).join('')}</tr>`)
+        .join('')}</tbody></table>`;
+  const cards = days
+    .map((d) => {
+      const ls = mine.filter((l) => l.day === d).sort((a, b) => a.num - b.num);
+      return `<section class="day ${d === today ? 'today' : ''}">
           <h4>${L.DAY_NAMES[d]}${d === today ? ' <small>сегодня</small>' : ''}</h4>
           ${
             ls.length
@@ -272,9 +282,71 @@ function scheduleTab(c) {
           }
           <button class="chip" data-act="lesson-form" data-child="${c.id}" data-day="${d}">+ Урок</button>
         </section>`;
-      })
-      .join('')}</div>
-    <p class="muted">Нажмите на урок, чтобы изменить или удалить. Расписание подсказывает срок домашки — до ближайшего урока по предмету.</p>`;
+    })
+    .join('');
+  return `<div class="toolbar"><span class="muted">Расписание уроков на неделю</span>
+      <span class="actions">${mine.some((l) => l.day === 6) ? '' : `<button class="chip" data-act="toggle-sat">${withSat ? 'Скрыть субботу' : 'Показать субботу'}</button>`}
+      <button class="btn primary sched-narrow" data-act="lesson-form" data-child="${c.id}">+ Урок</button></span></div>
+    <div class="sched-wide">${grid}<p class="muted">Выберите предмет в нужной клетке — расписание сохраняется сразу. Расписание нужно, чтобы вкладка «Дневник» знала, какие уроки в какой день.</p></div>
+    <div class="week sched-narrow">${cards}</div>
+    <p class="muted sched-narrow">Нажмите на урок, чтобы изменить время или кабинет. На большом экране расписание показано таблицей, как в дневнике.</p>`;
+}
+
+// --- Дневник: разворот недели ---
+
+function diaryTab(c) {
+  const today = L.todayISO();
+  const cur = W.weekStart(today);
+  diaryFrom = diaryFrom ?? cur;
+  const hasSat = state.schedule.some((l) => l.childId === c.id && l.day === 6);
+  const days = D.diaryWeek(state, c.id, diaryFrom, showSat || hasSat);
+  const to = L.addDays(diaryFrom, 6);
+  const nav = `<div class="weeknav">
+      <button class="chip" data-act="diary-shift" data-value="-1" aria-label="Предыдущая неделя">‹</button>
+      <strong>${L.formatDate(diaryFrom)} – ${L.formatDate(to)}${diaryFrom === cur ? ' <small>эта неделя</small>' : ''}</strong>
+      <button class="chip" data-act="diary-shift" data-value="1" aria-label="Следующая неделя">›</button>
+      ${diaryFrom === cur ? '' : '<button class="chip" data-act="diary-now">К текущей</button>'}
+      ${hasSat ? '' : `<button class="chip" data-act="toggle-sat">${showSat ? 'Скрыть субботу' : '+ суббота'}</button>`}
+    </div>`;
+  if (!state.schedule.some((l) => l.childId === c.id)) {
+    return `${nav}<p class="muted">Сначала заполните расписание уроков — оно станет строками дневника. <a class="link" href="#/child/${c.id}/schedule">Открыть расписание</a></p>`;
+  }
+  const hwCell = (row, date) => {
+    const t = row.tasks[0];
+    const more = row.tasks.slice(1);
+    return `<td class="hw">
+        <button class="st st-${t?.status ?? 'none'}" data-act="hw-status" data-id="${t?.id ?? ''}" ${t ? '' : 'disabled'} title="Нажмите: сделано → проверено → в работе">${{ todo: '☐', done: '✓', checked: '✓✓' }[t?.status] ?? '☐'}</button>
+        <textarea rows="2" data-act="hw-edit" data-child="${c.id}" data-subject="${row.lesson.subjectId}" data-date="${date}" placeholder="${row.first ? 'что задано…' : '(см. выше)'}" ${row.first ? '' : 'disabled'} aria-label="Домашнее задание: ${esc(row.subject)}">${esc(t?.text ?? '')}</textarea>
+        ${more.length ? `<p class="more">Ещё: ${more.map((x) => esc(x.text)).join(' · ')}</p>` : ''}
+      </td>`;
+  };
+  const gradeCell = (row, date) => {
+    const g = row.grades[0];
+    return `<td class="gr"><select data-act="grade-edit" data-child="${c.id}" data-subject="${row.lesson.subjectId}" data-date="${date}" ${row.first ? '' : 'disabled'} aria-label="Оценка: ${esc(row.subject)}">
+        <option value="">—</option>${[5, 4, 3, 2, 1].map((v) => `<option ${g?.value === v ? 'selected' : ''}>${v}</option>`).join('')}</select></td>`;
+  };
+  const page = days
+    .map(
+      (d) => `<section class="dday ${d.date === today ? 'today' : ''}">
+      <h4>${d.name} <small>${L.formatDate(d.date)}</small></h4>
+      ${
+        d.rows.length
+          ? `<table class="dtable"><thead><tr><th>№</th><th>Предмет</th><th>Домашнее задание</th><th>Оц.</th></tr></thead><tbody>${d.rows
+              .map((r) => `<tr><td class="num">${r.lesson.num}</td><td class="subj">${esc(r.subject)}${r.lesson.room ? `<small>каб. ${esc(r.lesson.room)}</small>` : ''}</td>${hwCell(r, d.date)}${gradeCell(r, d.date)}</tr>`)
+              .join('')}</tbody></table>`
+          : '<p class="muted">В этот день уроков нет.</p>'
+      }
+      ${d.extraTasks.length ? `<div class="dextra"><b>Ещё на этот день:</b> ${d.extraTasks.map((t) => `${esc(subjectName(t.subjectId))}: ${esc(t.text)}`).join(' · ')}</div>` : ''}
+      <div class="dnotes"><b>Замечания:</b>
+        ${d.remarks.length ? d.remarks.map((r) => `<span class="tag ${(REMARK_TYPES[r.type] ?? REMARK_TYPES.info).cls}" title="${esc(r.text)}">${esc(r.text.length > 40 ? `${r.text.slice(0, 39)}…` : r.text)}</span>`).join(' ') : '<span class="muted">нет</span>'}
+        <button class="chip" data-act="remark-form" data-child="${c.id}" data-date="${d.date}">+ Замечание</button>
+        <button class="chip" data-act="task-form" data-child="${c.id}" data-date="${d.date}">+ Другое задание</button>
+      </div>
+    </section>`,
+    )
+    .join('');
+  return `${nav}<div class="spread">${page}</div>
+    <p class="muted">Пишите домашнее задание прямо в строке нужного предмета (в день, к которому оно задано) — оно сохранится само и появится в «Заданиях». Значок слева от задания: ☐ в работе, ✓ сделано, ✓✓ проверено.</p>`;
 }
 
 // --- Задания ---
@@ -290,7 +362,7 @@ function tasksTab(c) {
       <div class="chips">${Object.entries(filters)
         .map(([k, v]) => `<button class="chip ${k === taskFilter ? 'on' : ''}" data-act="task-filter" data-value="${k}">${v}</button>`)
         .join('')}</div>
-      <span class="actions"><button class="btn" data-act="diary-form" data-child="${c.id}">📷 Из дневника</button><button class="btn primary" data-act="task-form" data-child="${c.id}">+ Задание</button></span>
+      <button class="btn primary" data-act="task-form" data-child="${c.id}">+ Задание</button>
     </div>
     ${items.length ? `<ul class="list">${items.map((t) => taskItem(t, today)).join('')}</ul>` : '<p class="muted">Заданий нет.</p>'}`;
 }
@@ -389,7 +461,6 @@ function settingsPage() {
         .join('')}</ul>
       <button class="btn" data-act="subject-add">+ Добавить предмет</button>
     </section>
-    ${aiSettings()}
     ${remindSettings()}
     <section>
       <h3>Резервная копия</h3>
@@ -416,7 +487,7 @@ const KINDS = {
   lesson: { list: 'schedule', title: ['Новый урок', 'Урок'] },
 };
 
-function formFields(kind, item, childId, day) {
+function formFields(kind, item, childId, day, date) {
   const today = L.todayISO();
   if (kind === 'lesson') {
     const d = item?.day ?? day ?? 1;
@@ -433,7 +504,7 @@ function formFields(kind, item, childId, day) {
   }
   if (kind === 'task') {
     const firstSubject = item?.subjectId ?? state.subjects[0]?.id;
-    const dueDefault = item?.due ?? L.nextLessonDate(state, childId, firstSubject, today) ?? L.addDays(today, 1);
+    const dueDefault = item?.due ?? date ?? L.nextLessonDate(state, childId, firstSubject, today) ?? L.addDays(today, 1);
     return `<label>Предмет<select name="subjectId" required>${subjectOptions(item?.subjectId)}</select></label>
       <label>Что задано<textarea name="text" rows="3" required>${esc(item?.text ?? '')}</textarea></label>
       <label>Срок сдачи<input type="date" name="due" value="${dueDefault}" required /></label>
@@ -452,13 +523,13 @@ function formFields(kind, item, childId, day) {
   return `<label>Тип<select name="type">${Object.entries(REMARK_TYPES)
       .map(([k, v]) => `<option value="${k}" ${k === (item?.type ?? 'negative') ? 'selected' : ''}>${v.label}</option>`)
       .join('')}</select></label>
-    <label>Дата<input type="date" name="date" value="${item?.date ?? today}" required /></label>
+    <label>Дата<input type="date" name="date" value="${item?.date ?? date ?? today}" required /></label>
     <label>Предмет (необязательно)<select name="subjectId">${subjectOptions(item?.subjectId, true)}</select></label>
     <label>Кто написал (необязательно)<input name="teacher" value="${esc(item?.teacher ?? '')}" placeholder="Например, Мария Ивановна" /></label>
     <label>Текст<textarea name="text" rows="3" required>${esc(item?.text ?? '')}</textarea></label>`;
 }
 
-function openForm(kind, { id, childId, day } = {}) {
+function openForm(kind, { id, childId, day, date } = {}) {
   const meta = KINDS[kind];
   const item = id ? state[meta.list].find((x) => x.id === id) : null;
   const cid = item?.childId ?? childId ?? route().id ?? state.children[0]?.id;
@@ -472,7 +543,7 @@ function openForm(kind, { id, childId, day } = {}) {
   dlg.innerHTML = `<form method="dialog" id="entry-form">
       <h3>${meta.title[item ? 1 : 0]}</h3>
       ${childSelect}
-      ${formFields(kind, item, cid, Number(day) || undefined)}
+      ${formFields(kind, item, cid, Number(day) || undefined, date || undefined)}
       ${kind === 'lesson' ? '' : `<div class="field"><span>Фото (необязательно)</span>
         <label class="btn small">📷 Добавить фото<input type="file" accept="image/*" multiple hidden data-act="pick-photos" /></label>
         <div class="photos" id="form-photos"></div>
@@ -629,36 +700,12 @@ function remindSettings() {
     </section>`;
 }
 
-function aiSettings() {
-  const cur = AI.getSettings();
-  const masked = cur.apiKey ? `сохранён (••••${esc(cur.apiKey.slice(-4))})` : 'не задан';
-  return `<section>
-      <h3>ИИ-помощник</h3>
-      <p class="muted">Включает две функции: распознавание фото дневника и подбор заданий на слабые темы. Работает через ваш собственный ключ Claude API (его создают на console.anthropic.com). Оплата — по факту использования, поэтому задайте в консоли ограничение расходов для ключа.</p>
-      <ul class="plain muted">
-        <li>Ключ хранится только в этом браузере и отправляется только в Anthropic. В резервную копию и в репозиторий он не попадает.</li>
-        <li>Любой, кто пользуется этим браузером, сможет его увидеть — не вводите ключ на чужом устройстве.</li>
-        <li>Фото и тексты заданий уходят в Anthropic для обработки. Имя ребёнка программа не отправляет, но оно может быть видно на фото дневника.</li>
-      </ul>
-      <label>Ключ API (сейчас: ${masked})<input id="ai-key" type="password" autocomplete="off" placeholder="sk-ant-…" /></label>
-      <label>Модель<select id="ai-model">${AI.MODELS.map((m) => `<option value="${m.id}" ${m.id === cur.model ? 'selected' : ''}>${esc(m.label)} · ${esc(m.hint)}</option>`).join('')}</select></label>
-      <p class="msg" id="ai-msg"></p>
-      <div class="actions">
-        <button class="btn primary" data-act="ai-save">Сохранить</button>
-        <button class="btn" data-act="ai-check">Проверить ключ</button>
-        ${cur.apiKey ? '<button class="btn danger" data-act="ai-clear">Удалить ключ</button>' : ''}
-      </div>
-    </section>`;
-}
+// ---------- Подтянуть: рекомендации ----------
 
-// ---------- Подтянуть: рекомендации и подбор заданий ----------
-
-const LEVEL_LABELS = { easier: 'Проще, чем в классе (закрепить основу)', normal: 'Как в классе', harder: 'Немного сложнее' };
-const PLAN = 'План на 5 дней по 10–15 минут: 1) вместе разберите ошибки в последней работе; 2) каждый день 5–8 заданий на тему; 3) в конце недели — короткая самопроверка.';
+const PLAN = 'План на 5 дней по 10–15 минут: 1) вместе разберите ошибки в последней работе; 2) каждый день 5–8 заданий на тему из учебника или рабочей тетради; 3) в конце недели — короткая самопроверка.';
 
 function practiceTab(c) {
   const weak = W.weakSubjects(state, c.id, L.todayISO());
-  const sets = state.practice.filter((p) => p.childId === c.id).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   return `<section>
       <h3>Что подтянуть <small class="muted">— по данным за 2 недели</small></h3>
       ${
@@ -668,285 +715,15 @@ function practiceTab(c) {
                 (w) => `<div class="item">
           <div class="item-top"><span class="tag">${esc(w.subject)}</span></div>
           <p class="text">${esc(w.reasons.join('; '))}</p>
+          ${w.topics.length ? `<p class="note">Темы из ваших записей: ${w.topics.map(esc).join(' · ')}</p>` : ''}
           <p class="note">${PLAN}</p>
-          ${w.topics.length ? `<p class="note">Темы из школьных записей — нажмите, чтобы подобрать задания:</p><div class="chips">${w.topics.map((t) => `<button class="chip" data-act="practice-form" data-child="${c.id}" data-subject="${w.subjectId}" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}
-          <div class="actions"><button class="btn small primary" data-act="practice-form" data-child="${c.id}" data-subject="${w.subjectId}">✨ Подобрать задания</button></div>
+          <div class="actions"><button class="chip" data-act="goto-grades" data-child="${c.id}" data-subject="${w.subjectId}">Оценки по предмету</button></div>
         </div>`,
               )
               .join('')
-          : '<p class="ok">Явных проблем за последние две недели не видно 👍 Можно потренировать любую тему для закрепления.</p>'
-      }
-    </section>
-    <div class="actions"><button class="btn" data-act="practice-form" data-child="${c.id}">✨ Подобрать задания по любой теме</button></div>
-    ${AI.hasKey() ? '' : '<p class="note">Для подбора заданий нужен ключ ИИ — добавьте его в <a class="link" href="#/settings">настройках</a>.</p>'}
-    <section>
-      <h3>Сохранённые тренировки</h3>
-      ${
-        sets.length
-          ? `<ul class="list">${sets
-              .map(
-                (p) => `<li class="item row"><span><strong>${esc(p.title)}</strong><br><small class="muted">${esc(subjectName(p.subjectId))} · ${L.formatDate(p.createdAt.slice(0, 10))} · ${p.items.length} зад.</small></span>
-              <button class="chip" data-act="practice-open" data-id="${p.id}">Открыть</button></li>`,
-              )
-              .join('')}</ul>`
-          : '<p class="muted">Пока нет.</p>'
+          : '<p class="ok">Явных проблем за последние две недели не видно 👍</p>'
       }
     </section>`;
-}
-
-const dlgStatus = (msg, isError = false) => {
-  const el = dlg.querySelector('.msg');
-  if (el) {
-    el.textContent = msg;
-    el.className = isError ? 'msg error' : 'msg';
-  }
-};
-const dlgBusy = (on) => dlg.querySelectorAll('button:not([data-act="close-dialog"]),select,input,textarea').forEach((el) => (el.disabled = on));
-const childSelect = (cid) =>
-  state.children.length > 1
-    ? `<label>Ребёнок<select name="childId">${state.children.map((c) => `<option value="${c.id}" ${c.id === cid ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>`
-    : `<input type="hidden" name="childId" value="${cid}" />`;
-const keyWarning = () => (AI.hasKey() ? '' : '<p class="msg error">Не задан ключ ИИ — добавьте его в <a class="link" href="#/settings" data-act="close-dialog">настройках</a>.</p>');
-
-function openPracticeForm({ childId, subjectId, topic } = {}) {
-  const cid = childId || route().id || state.children[0]?.id;
-  form = { kind: 'practice' };
-  dlg.innerHTML = `<form id="practice-form">
-      <h3>Подобрать задания</h3>
-      ${childSelect(cid)}
-      <label>Предмет<select name="subjectId">${subjectOptions(subjectId || state.subjects[0]?.id)}</select></label>
-      <label>Тема (необязательно)<input name="topic" value="${esc(topic ?? '')}" placeholder="например, деление в столбик" /></label>
-      <label>Сколько заданий<select name="count"><option>5</option><option selected>8</option><option>10</option></select></label>
-      <label>Сложность<select name="level">${Object.entries(LEVEL_LABELS).map(([k, v]) => `<option value="${k}" ${k === 'normal' ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
-      <p class="note">В Claude отправляются класс, предмет, тема и названия слабых мест из школьных записей. Имя ребёнка не отправляется.</p>
-      ${keyWarning()}
-      <p class="msg"></p>
-      <div class="actions end"><button type="button" class="btn" data-act="close-dialog">Отмена</button><button type="submit" class="btn primary">Подобрать</button></div>
-    </form>`;
-  dlg.showModal();
-}
-
-async function submitPractice(e) {
-  e.preventDefault();
-  const fd = Object.fromEntries(new FormData(e.target));
-  const child = childById(fd.childId);
-  const current = form;
-  const today = L.todayISO();
-  const hints = W.weakSubjects(state, child.id, today).find((w) => w.subjectId === fd.subjectId)?.topics ?? [];
-  const req = M.practicePrompt({ grade: child.grade, subject: subjectName(fd.subjectId), topic: fd.topic.trim(), count: Number(fd.count), level: fd.level, hints });
-  dlgBusy(true);
-  dlgStatus('Подбираю задания… обычно до минуты');
-  try {
-    const set = M.normalizePractice(await AI.ask({ system: req.system, user: req.user, schema: req.schema }));
-    const rec = { id: S.uid(), childId: child.id, subjectId: fd.subjectId, topic: fd.topic.trim(), level: fd.level, createdAt: new Date().toISOString(), ...set };
-    state.practice.push(rec);
-    S.save(state);
-    if (form === current) openPracticeView(rec.id);
-    render();
-  } catch (err) {
-    if (form !== current) return;
-    dlgBusy(false);
-    dlgStatus(err.message, true);
-  }
-}
-
-function openPracticeView(id) {
-  const p = state.practice.find((x) => x.id === id);
-  if (!p) return;
-  const c = childById(p.childId);
-  form = { kind: 'practiceView', id };
-  dlg.innerHTML = `<div class="practice">
-      <h3>${esc(p.title)}</h3>
-      <p class="muted">${esc(subjectName(p.subjectId))}${c ? ` · ${esc(c.grade)} класс` : ''} · ${L.formatDate(p.createdAt.slice(0, 10))}</p>
-      ${p.intro ? `<p>${esc(p.intro)}</p>` : ''}
-      <ol class="qs">${p.items
-        .map((i) => `<li><p>${esc(i.question)}</p><details><summary>Ответ и подсказка</summary><p><b>Ответ:</b> ${esc(i.answer)}</p>${i.hint ? `<p class="muted">Подсказка: ${esc(i.hint)}</p>` : ''}</details></li>`)
-        .join('')}</ol>
-      <p class="note">⚠️ Задания составлены ИИ, а он может ошибаться: перед занятием быстро просмотрите ответы.</p>
-      <div class="actions">
-        <button class="btn primary" data-act="practice-add-task" data-id="${p.id}">Добавить как задание</button>
-        <button class="btn" data-act="practice-copy" data-id="${p.id}">📋 Копировать</button>
-        <button class="btn" data-act="practice-print" data-id="${p.id}">🖨 Печать</button>
-      </div>
-      <div class="actions end">
-        <button class="btn danger" data-act="practice-delete" data-id="${p.id}">Удалить</button>
-        <button class="btn" data-act="close-dialog">Закрыть</button>
-      </div>
-    </div>`;
-  if (!dlg.open) dlg.showModal();
-}
-
-function addPracticeAsTask(id) {
-  const p = state.practice.find((x) => x.id === id);
-  const today = L.todayISO();
-  state.tasks.push({
-    id: S.uid(),
-    childId: p.childId,
-    subjectId: p.subjectId,
-    text: M.practiceAsTaskText(p),
-    due: L.nextLessonDate(state, p.childId, p.subjectId, today) ?? M.nextSchoolDay(today),
-    status: 'todo',
-    note: 'Тренировка (подобрана ИИ)',
-    photoIds: [],
-    createdAt: new Date().toISOString(),
-  });
-  form = null;
-  dlg.close();
-  location.hash = `#/child/${p.childId}/tasks`;
-  commit();
-}
-
-async function copyPractice(id, el) {
-  const p = state.practice.find((x) => x.id === id);
-  const text = [p.title, '', ...p.items.map((i, n) => `${n + 1}) ${i.question}`), '', 'Ответы:', ...p.items.map((i, n) => `${n + 1}) ${i.answer}`)].join('\n');
-  try {
-    await navigator.clipboard.writeText(text);
-    el.textContent = '✓ Скопировано';
-  } catch {
-    prompt('Скопируйте текст:', text);
-  }
-}
-
-function printPractice(id) {
-  const p = state.practice.find((x) => x.id === id);
-  const w = window.open('', '_blank');
-  if (!w) {
-    alert('Браузер заблокировал окно печати. Разрешите всплывающие окна для этого сайта.');
-    return;
-  }
-  const css = 'body{font:16px/1.5 system-ui,sans-serif;margin:24px}h1{font-size:20px}li{margin:14px 0}.line{border-bottom:1px solid #999;height:26px}.pb{page-break-before:always}';
-  w.document.write(`<!doctype html><meta charset="utf-8"><title>${esc(p.title)}</title><style>${css}</style>
-    <h1>${esc(p.title)}</h1><p>${esc(subjectName(p.subjectId))} · Имя: ____________________ · Дата: ____________</p>
-    <ol>${p.items.map((i) => `<li>${esc(i.question)}<div class="line"></div></li>`).join('')}</ol>
-    <div class="pb"><h1>Ответы (для родителя)</h1><ol>${p.items.map((i) => `<li>${esc(i.answer)}${i.hint ? ` <small>(${esc(i.hint)})</small>` : ''}</li>`).join('')}</ol></div>`);
-  w.document.close();
-  w.focus();
-  w.print();
-}
-
-// ---------- Импорт из дневника по фото ----------
-
-function openDiary(childId) {
-  form = { kind: 'diary', childId: childId || route().id || state.children[0]?.id, existing: [], removed: [], pending: [], loading: Promise.resolve(), result: null };
-  diaryStep1();
-}
-
-function diaryStep1() {
-  dlg.innerHTML = `<form id="diary-form">
-      <h3>Фото дневника → записи</h3>
-      <p class="note">Сфотографируйте страницу дневника (можно несколько). Claude прочитает задания, оценки и замечания, а вы проверите их и подтвердите — без вашего подтверждения ничего не сохранится.</p>
-      ${childSelect(form.childId)}
-      <div class="field"><label class="btn small">📷 Добавить фото страницы<input type="file" accept="image/*" multiple hidden data-act="pick-photos" /></label><div class="photos" id="form-photos"></div></div>
-      <p class="note">⚠️ Фото отправляется в Anthropic (сервис Claude) для распознавания. В дневнике обычно написано ФИО ребёнка — лучше снимать так, чтобы оно не попало в кадр.</p>
-      ${keyWarning()}
-      <p class="msg"></p>
-      <div class="actions end"><button type="button" class="btn" data-act="close-dialog">Отмена</button><button type="submit" class="btn primary">Распознать</button></div>
-    </form>`;
-  if (!dlg.open) dlg.showModal();
-  renderFormPhotos();
-}
-
-async function submitDiary(e) {
-  e.preventDefault();
-  const current = form;
-  await current.loading;
-  if (!current.pending.length) return dlgStatus('Добавьте хотя бы одно фото.', true);
-  if (current.pending.length > 4) return dlgStatus('Не больше 4 фото за раз.', true);
-  current.childId = new FormData(e.target).get('childId') ?? current.childId;
-  const today = L.todayISO();
-  const req = M.diaryPrompt(state.subjects, today);
-  dlgBusy(true);
-  dlgStatus('Читаю дневник… обычно 10–40 секунд');
-  try {
-    const raw = await AI.ask({ system: req.system, user: req.user, images: current.pending.map((p) => p.blob), schema: req.schema });
-    if (form !== current) return;
-    current.result = M.normalizeDiary(raw, state.subjects, today);
-    diaryReview();
-  } catch (err) {
-    if (form !== current) return;
-    dlgBusy(false);
-    dlgStatus(err.message, true);
-  }
-}
-
-function diaryReview() {
-  const { result: r, childId: cid } = form;
-  const norm = (x) => x.toLowerCase().replace(/\s+/g, ' ').trim();
-  const dupTask = (t) => state.tasks.some((x) => x.childId === cid && x.subjectId === t.subjectId && x.due === t.due && norm(x.text) === norm(t.text));
-  const dupGrade = (g) => state.grades.some((x) => x.childId === cid && x.subjectId === g.subjectId && x.date === g.date && x.value === g.value);
-  const dupRemark = (m) => state.remarks.some((x) => x.childId === cid && x.date === m.date && norm(x.text) === norm(m.text));
-  const head = (label, dup) => `<label class="chk"><input type="checkbox" name="on" ${dup ? '' : 'checked'} /> <span>${label}</span>${dup ? ' <em>уже есть</em>' : ''}</label>`;
-  const unknown = (name, id) => (!id && name ? `<small class="muted">в дневнике: «${esc(name)}»</small>` : '');
-  const total = r.tasks.length + r.grades.length + r.remarks.length;
-  if (!total) {
-    dlg.innerHTML = `<div><h3>Ничего не распознано</h3><p>Не удалось найти записи на фото. Попробуйте снять страницу ровнее и ближе, при хорошем освещении.</p>
-      <div class="actions end"><button class="btn" data-act="diary-back">Назад</button><button class="btn" data-act="close-dialog">Закрыть</button></div></div>`;
-    return;
-  }
-  const rows = [];
-  r.tasks.forEach((t, i) =>
-    rows.push(`<div class="rv" data-kind="t" data-i="${i}">${head('Задание', dupTask(t))}
-      <select name="subj">${subjectOptions(t.subjectId, true)}</select>${unknown(t.subjectName, t.subjectId)}
-      <input type="date" name="due" value="${t.due}" aria-label="Срок" />
-      <textarea name="text" rows="2">${esc(t.text)}</textarea></div>`),
-  );
-  r.grades.forEach((g, i) =>
-    rows.push(`<div class="rv" data-kind="g" data-i="${i}">${head('Оценка', dupGrade(g))}
-      <select name="subj">${subjectOptions(g.subjectId, true)}</select>${unknown(g.subjectName, g.subjectId)}
-      <select name="value">${[5, 4, 3, 2, 1].map((v) => `<option ${v === g.value ? 'selected' : ''}>${v}</option>`).join('')}</select>
-      <input type="date" name="date" value="${g.date}" aria-label="Дата" />
-      <input name="kind" value="${esc(g.kind)}" placeholder="вид работы" />
-      <input name="comment" value="${esc(g.comment)}" placeholder="комментарий" /></div>`),
-  );
-  r.remarks.forEach((m, i) =>
-    rows.push(`<div class="rv" data-kind="r" data-i="${i}">${head('Замечание / похвала', dupRemark(m))}
-      <select name="type">${Object.entries(REMARK_TYPES).map(([k, v]) => `<option value="${k}" ${k === m.type ? 'selected' : ''}>${v.label}</option>`).join('')}</select>
-      <input type="date" name="date" value="${m.date}" aria-label="Дата" />
-      <select name="subj">${subjectOptions(m.subjectId, true)}</select>
-      <input name="teacher" value="${esc(m.teacher)}" placeholder="кто написал" />
-      <textarea name="text" rows="2">${esc(m.text)}</textarea></div>`),
-  );
-  dlg.innerHTML = `<form id="diary-review">
-      <h3>Проверьте распознанное</h3>
-      <p class="note">ИИ мог ошибиться — исправьте поля и снимите галочки с лишнего. Сохранится только отмеченное.</p>
-      ${rows.join('')}
-      <p class="msg"></p>
-      <div class="actions end"><button type="button" class="btn" data-act="diary-back">Назад</button><button type="submit" class="btn primary">Добавить отмеченное</button></div>
-    </form>`;
-}
-
-function submitDiaryReview(e) {
-  e.preventDefault();
-  const cid = form.childId;
-  const now = new Date().toISOString();
-  const added = { tasks: [], grades: [], remarks: [] };
-  for (const row of e.target.querySelectorAll('.rv')) {
-    if (!row.querySelector('[name=on]').checked) continue;
-    const v = (n) => row.querySelector(`[name=${n}]`)?.value.trim() ?? '';
-    const kind = row.dataset.kind;
-    if (kind === 't') {
-      if (!v('subj') || !v('due') || !v('text')) return dlgStatus('У каждого задания должны быть предмет, срок и текст.', true);
-      added.tasks.push({ id: S.uid(), childId: cid, subjectId: v('subj'), text: v('text'), due: v('due'), status: 'todo', note: '', photoIds: [], createdAt: now });
-    } else if (kind === 'g') {
-      if (!v('subj') || !v('date')) return dlgStatus('У каждой оценки должны быть предмет и дата.', true);
-      added.grades.push({ id: S.uid(), childId: cid, subjectId: v('subj'), value: Number(v('value')), kind: v('kind') || 'Другое', date: v('date'), comment: v('comment'), photoIds: [], createdAt: now });
-    } else {
-      if (!v('text') || !v('date')) return dlgStatus('У каждого замечания должны быть дата и текст.', true);
-      const rec = { id: S.uid(), childId: cid, type: v('type'), date: v('date'), text: v('text'), teacher: v('teacher'), photoIds: [], createdAt: now };
-      if (v('subj')) rec.subjectId = v('subj');
-      added.remarks.push(rec);
-    }
-  }
-  const n = added.tasks.length + added.grades.length + added.remarks.length;
-  if (!n) return dlgStatus('Ничего не отмечено.', true);
-  state.tasks.push(...added.tasks);
-  state.grades.push(...added.grades);
-  state.remarks.push(...added.remarks);
-  form.pending.forEach((p) => URL.revokeObjectURL(p.url));
-  form = null;
-  dlg.close();
-  location.hash = `#/child/${cid}/${added.tasks.length ? 'tasks' : added.grades.length ? 'grades' : 'remarks'}`;
-  commit();
 }
 
 // ---------- Обработчики ----------
@@ -954,15 +731,43 @@ function submitDiaryReview(e) {
 document.addEventListener('submit', (e) => {
   if (e.target.id === 'entry-form') submitEntry(e);
   if (e.target.id === 'child-form') submitChild(e);
-  if (e.target.id === 'practice-form') submitPractice(e);
-  if (e.target.id === 'diary-form') submitDiary(e);
-  if (e.target.id === 'diary-review') submitDiaryReview(e);
 });
 
 dlg.addEventListener('cancel', () => form?.pending?.forEach((p) => URL.revokeObjectURL(p.url)));
 
 document.addEventListener('change', async (e) => {
   const act = e.target.dataset.act;
+  if (act === 'hw-edit') {
+    const { child, subject, date } = e.target.dataset;
+    const r = D.saveHomework(state, { childId: child, subjectId: subject, date, text: e.target.value }, S.uid);
+    if (r.blocked) {
+      alert(r.blocked);
+      render();
+      return;
+    }
+    S.save(state);
+    const btn = e.target.closest('td').querySelector('.st');
+    btn.disabled = !r.task;
+    btn.dataset.id = r.task?.id ?? '';
+    btn.textContent = r.task ? { todo: '☐', done: '✓', checked: '✓✓' }[r.task.status] : '☐';
+    return;
+  }
+  if (act === 'grade-edit') {
+    const { child, subject, date } = e.target.dataset;
+    const r = D.saveGrade(state, { childId: child, subjectId: subject, date, value: e.target.value }, S.uid);
+    if (r.blocked) {
+      alert(r.blocked);
+      render();
+      return;
+    }
+    S.save(state);
+    return;
+  }
+  if (act === 'lesson-cell') {
+    D.setLessonSubject(state, { childId: e.target.dataset.child, day: Number(e.target.dataset.day), num: Number(e.target.dataset.num), subjectId: e.target.value }, S.uid);
+    S.save(state);
+    return;
+  }
   if (act === 'evening-time') {
     if (e.target.value) setPrefs({ evening: e.target.value });
     return;
@@ -982,7 +787,7 @@ document.addEventListener('change', async (e) => {
     current.loading = (current.loading ?? Promise.resolve()).then(async () => {
       for (const file of files) {
         try {
-          const blob = await S.shrinkImage(file, form.kind === 'diary' ? 2000 : 1600, form.kind === 'diary' ? 0.85 : 0.8);
+          const blob = await S.shrinkImage(file);
           current.pending.push({ blob, url: URL.createObjectURL(blob) });
         } catch {
           alert('Не удалось обработать одно из фото');
@@ -1010,9 +815,9 @@ document.addEventListener('click', async (e) => {
   switch (act) {
     case 'child-form': openChildForm(id); break;
     case 'delete-child': await deleteChild(); break;
-    case 'task-form': openForm('task', { id, childId: child }); break;
+    case 'task-form': openForm('task', { id, childId: child, date: el.dataset.date }); break;
     case 'grade-form': openForm('grade', { id, childId: child }); break;
-    case 'remark-form': openForm('remark', { id, childId: child }); break;
+    case 'remark-form': openForm('remark', { id, childId: child, date: el.dataset.date }); break;
     case 'week-shift': weekFrom = L.addDays(weekFrom ?? W.weekStart(L.todayISO()), 7 * Number(value)); render(); break;
     case 'week-now': weekFrom = null; render(); break;
     case 'copy-summary': {
@@ -1079,45 +884,21 @@ document.addEventListener('click', async (e) => {
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
       break;
     }
-    case 'diary-form': openDiary(child); break;
-    case 'diary-back': diaryStep1(); break;
-    case 'practice-form': openPracticeForm({ childId: child, subjectId: el.dataset.subject, topic: el.dataset.topic }); break;
-    case 'practice-open': openPracticeView(id); break;
-    case 'practice-add-task': addPracticeAsTask(id); break;
-    case 'practice-copy': await copyPractice(id, el); break;
-    case 'practice-print': printPractice(id); break;
-    case 'practice-delete':
-      if (confirm('Удалить эту тренировку?')) {
-        state.practice = state.practice.filter((x) => x.id !== id);
-        form = null;
-        dlg.close();
+    case 'goto-grades':
+      gradeSubject = el.dataset.subject;
+      location.hash = `#/child/${child}/grades`;
+      break;
+    case 'diary-shift': diaryFrom = L.addDays(diaryFrom ?? W.weekStart(L.todayISO()), 7 * Number(value)); render(); break;
+    case 'diary-now': diaryFrom = null; render(); break;
+    case 'toggle-sat': showSat = !showSat; render(); break;
+    case 'hw-status': {
+      const t = state.tasks.find((x) => x.id === id);
+      if (t) {
+        t.status = { todo: 'done', done: 'checked', checked: 'todo' }[t.status] ?? 'todo';
         commit();
       }
       break;
-    case 'ai-save': {
-      const cur = AI.getSettings();
-      AI.saveSettings({ apiKey: document.getElementById('ai-key').value.trim() || cur.apiKey, model: document.getElementById('ai-model').value });
-      render();
-      break;
     }
-    case 'ai-check': {
-      const msg = document.getElementById('ai-msg');
-      const key = document.getElementById('ai-key').value.trim() || AI.getSettings().apiKey;
-      if (!key) { msg.textContent = 'Сначала введите ключ.'; break; }
-      msg.className = 'msg';
-      msg.textContent = 'Проверяю…';
-      try {
-        await AI.checkKey(key, document.getElementById('ai-model').value);
-        msg.textContent = '✓ Ключ работает.';
-      } catch (err) {
-        msg.className = 'msg error';
-        msg.textContent = err.message;
-      }
-      break;
-    }
-    case 'ai-clear':
-      if (confirm('Удалить сохранённый ключ из этого браузера?')) { AI.clearSettings(); render(); }
-      break;
     case 'ics-export': {
       const [h, m] = getPrefs().evening.split(':').map(Number);
       const blob = new Blob([R.buildICS(state, L.todayISO(), { hour: h, minute: m })], { type: 'text/calendar;charset=utf-8' });

@@ -160,16 +160,63 @@ a.chip { text-decoration: none; }
 
 .remind { margin-bottom: 14px; }
 .remind h3 { margin-top: 0; }
-.msg { margin: 0; font-size: .9rem; color: var(--muted); min-height: 0; }
-.msg.error { color: var(--high); }
-.msg:empty { display: none; }
-.practice { display: grid; gap: 10px; }
-.qs { padding-left: 22px; display: grid; gap: 10px; margin: 0; }
-.qs p { margin: 0 0 4px; white-space: pre-wrap; }
-details summary { cursor: pointer; color: var(--accent); }
-.rv { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; background: var(--bg); }
-.rv.dup { opacity: .75; }
-.rv em { color: var(--mid); font-size: .85rem; }
-.chk { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text); }
-.chk input { width: auto; }
-.rv small { margin-top: -2px; }
+
+/* ---- «Дневник» и расписание-таблица ---- */
+main.wide { max-width: 1500px; }
+.spread { display: grid; gap: 14px; grid-template-columns: 1fr; }
+.dday { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.dday.today { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.dday h4 { margin: 0 0 8px; }
+.dtable { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.dtable th { text-align: left; font-size: .8rem; color: var(--muted); font-weight: 600; padding: 4px 6px; border-bottom: 2px solid var(--line); }
+.dtable th:nth-child(1), .dtable td.num { width: 28px; text-align: center; }
+.dtable th:nth-child(4), .dtable td.gr { width: 62px; }
+.dtable th:nth-child(2) { width: 30%; }
+.dtable td { padding: 6px; border-bottom: 1px dashed var(--line); vertical-align: top; }
+.dtable td.num { color: var(--muted); padding-top: 12px; }
+.dtable td.subj { font-weight: 600; padding-top: 12px; overflow-wrap: anywhere; }
+.dtable td.subj small { display: block; font-weight: 400; }
+.dtable td.hw { display: flex; gap: 6px; align-items: flex-start; }
+.dtable td.hw textarea { flex: 1; min-height: 44px; resize: vertical; padding: 6px 8px; border-radius: 8px; background: transparent; border-color: var(--line); }
+.dtable td.hw textarea:focus { background: var(--bg); outline: 2px solid var(--accent); }
+.dtable td.hw .more { flex-basis: 100%; margin: 2px 0 0; font-size: .85rem; color: var(--muted); }
+.dtable td.hw { flex-wrap: wrap; }
+.dtable td.gr select { padding: 6px 4px; }
+.st { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 8px; min-width: 38px; height: 38px; cursor: pointer; font-size: 1rem; }
+.st:disabled { opacity: .35; cursor: default; }
+.st-done { color: var(--info); border-color: var(--info); }
+.st-checked { color: var(--ok); border-color: var(--ok); }
+.dextra { margin-top: 8px; font-size: .9rem; color: var(--muted); }
+.dnotes { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: .9rem; }
+.sched-wide { display: none; }
+.sgrid { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); table-layout: fixed; }
+.sgrid th { padding: 8px; font-size: .85rem; border: 1px solid var(--line); background: var(--bg); }
+.sgrid th.today { color: var(--accent); }
+.sgrid tbody th { width: 36px; }
+.sgrid td { border: 1px solid var(--line); padding: 2px; }
+.sgrid select { border: 0; background: transparent; padding: 8px 4px; }
+.sgrid select:focus { outline: 2px solid var(--accent); }
+@media (min-width: 900px) {
+  .spread { grid-template-columns: repeat(2, 1fr); }
+  .sched-wide { display: block; }
+  .sched-narrow { display: none; }
+}
+@media (min-width: 1300px) {
+  .spread { grid-template-columns: repeat(3, 1fr); }
+}
+@media print {
+  .top, .tabs, .weeknav, .dnotes .chip, .toolbar { display: none !important; }
+  body { background: #fff; }
+  .dday { break-inside: avoid; }
+}
+@media (max-width: 899px) {
+  .dtable, .dtable tbody, .dtable tr, .dtable td { display: block; width: auto; }
+  .dtable thead { display: none; }
+  .dtable tr { display: grid; grid-template-columns: 28px 1fr 64px; grid-template-areas: "num subj gr" "hw hw hw"; gap: 4px 8px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
+  .dtable tr:last-child { border-bottom: 0; }
+  .dtable td { border: 0; padding: 0; }
+  .dtable td.num { grid-area: num; padding-top: 8px; }
+  .dtable td.subj { grid-area: subj; padding-top: 8px; }
+  .dtable td.gr { grid-area: gr; width: auto; }
+  .dtable td.hw { grid-area: hw; }
+}
