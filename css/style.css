@@ -157,3 +157,19 @@ legend { font-size: .9rem; color: var(--muted); padding: 0; margin-bottom: 4px; 
 .of { font-size: .9rem; font-weight: 400; }
 .plain { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
 a.chip { text-decoration: none; }
+
+.remind { margin-bottom: 14px; }
+.remind h3 { margin-top: 0; }
+.msg { margin: 0; font-size: .9rem; color: var(--muted); min-height: 0; }
+.msg.error { color: var(--high); }
+.msg:empty { display: none; }
+.practice { display: grid; gap: 10px; }
+.qs { padding-left: 22px; display: grid; gap: 10px; margin: 0; }
+.qs p { margin: 0 0 4px; white-space: pre-wrap; }
+details summary { cursor: pointer; color: var(--accent); }
+.rv { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; background: var(--bg); }
+.rv.dup { opacity: .75; }
+.rv em { color: var(--mid); font-size: .85rem; }
+.chk { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text); }
+.chk input { width: auto; }
+.rv small { margin-top: -2px; }

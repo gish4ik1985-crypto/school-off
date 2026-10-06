@@ -10,6 +10,52 @@ export function weekStart(iso) {
   return addDays(iso, -(dow(iso) - 1));
 }
 
+const clip = (s, n = 90) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+// Предметы, которые стоит подтянуть, за период [from, to]: причины и «темы» (подсказки из заданий, комментариев, замечаний).
+export function focusSubjects(state, childId, from, to, today) {
+  const sn = (id) => state.subjects.find((s) => s.id === id)?.name ?? 'Без предмета';
+  const mine = (list) => state[list].filter((x) => x.childId === childId);
+  const missed = mine('tasks').filter((t) => inRange(t.due, from, to) && t.status === 'todo' && t.due < today);
+  const allGrades = mine('grades');
+  const low = allGrades.filter((g) => inRange(g.date, from, to) && g.value <= 3);
+  const negative = mine('remarks').filter((r) => r.type === 'negative' && inRange(r.date, from, to));
+
+  const acc = new Map();
+  const add = (sid, reason, topic) => {
+    if (!sid) return;
+    const e = acc.get(sid) ?? { reasons: [], topics: [] };
+    if (reason) e.reasons.push(reason);
+    if (topic && !e.topics.includes(topic)) e.topics.push(topic);
+    acc.set(sid, e);
+  };
+  const bySubject = (arr) => arr.reduce((m, x) => m.set(x.subjectId, [...(m.get(x.subjectId) ?? []), x]), new Map());
+
+  for (const [sid, arr] of bySubject(missed)) {
+    add(sid, `не сдано заданий: ${arr.length}`);
+    for (const t of arr) add(sid, null, clip(t.text));
+  }
+  for (const [sid, arr] of bySubject(low)) {
+    add(sid, `оценки ${arr.map((g) => g.value).join(', ')}`);
+    for (const g of arr) if (g.comment) add(sid, null, clip(g.comment));
+  }
+  for (const [sid, arr] of bySubject(negative)) {
+    add(sid, arr.length > 1 ? `замечаний: ${arr.length}` : 'замечание');
+  }
+  for (const st of subjectStats(allGrades.filter((g) => g.date <= to), state.subjects)) {
+    if (st.count >= 3 && st.avg < 3.5) add(st.subject.id, `средний балл ${st.avg}`);
+    else if (st.trend !== null && st.trend <= -0.5) add(st.subject.id, 'оценки снижаются');
+  }
+  return [...acc.entries()]
+    .map(([sid, e]) => ({ subjectId: sid, subject: sn(sid), reasons: e.reasons, topics: e.topics }))
+    .sort((a, b) => b.reasons.length - a.reasons.length);
+}
+
+// Что подтянуть прямо сейчас: последние две недели
+export function weakSubjects(state, childId, today) {
+  return focusSubjects(state, childId, addDays(today, -14), today, today);
+}
+
 // Сводка за неделю [from, from+6] (пн–вс). today нужен, чтобы отличить «просрочено» от «ещё впереди».
 export function weeklySummary(state, childId, from, today) {
   const to = addDays(from, 6);
@@ -32,22 +78,7 @@ export function weeklySummary(state, childId, from, today) {
   const negative = remarks.filter((r) => r.type === 'negative');
   const positive = remarks.filter((r) => r.type === 'positive');
 
-  // Предметы в фокусе: что именно стоит подтянуть и почему
-  const reasons = new Map();
-  const add = (sid, text) => {
-    if (sid) reasons.set(sid, [...(reasons.get(sid) ?? []), text]);
-  };
-  const bySubject = (arr) => arr.reduce((m, x) => m.set(x.subjectId, [...(m.get(x.subjectId) ?? []), x]), new Map());
-  for (const [sid, arr] of bySubject(missed)) add(sid, `не сдано заданий: ${arr.length}`);
-  for (const [sid, arr] of bySubject(grades.filter((g) => g.value <= 3))) add(sid, `оценки ${arr.map((g) => g.value).join(', ')}`);
-  for (const [sid, arr] of bySubject(negative)) add(sid, arr.length > 1 ? `замечаний: ${arr.length}` : 'замечание');
-  for (const st of subjectStats(allGrades.filter((g) => g.date <= to), state.subjects)) {
-    if (st.count >= 3 && st.avg < 3.5) add(st.subject.id, `средний балл ${st.avg}`);
-    else if (st.trend !== null && st.trend <= -0.5) add(st.subject.id, 'оценки снижаются');
-  }
-  const focus = [...reasons.entries()]
-    .map(([sid, r]) => ({ subject: sn(sid), reasons: r }))
-    .sort((a, b) => b.reasons.length - a.reasons.length);
+  const focus = focusSubjects(state, childId, from, to, today);
 
   const nextFrom = addDays(from, 7);
   const next = mine('tasks').filter((t) => t.status === 'todo' && inRange(t.due, nextFrom, addDays(nextFrom, 6))).length;

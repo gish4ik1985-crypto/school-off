@@ -31,6 +31,7 @@ export function defaultState() {
     grades: [],
     remarks: [],
     schedule: [],
+    practice: [],
   };
 }
 
@@ -45,6 +46,7 @@ export function normalize(raw) {
     grades: Array.isArray(raw.grades) ? raw.grades : [],
     remarks: Array.isArray(raw.remarks) ? raw.remarks : [],
     schedule: Array.isArray(raw.schedule) ? raw.schedule : [],
+    practice: Array.isArray(raw.practice) ? raw.practice : [],
   };
 }
 
