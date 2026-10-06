@@ -4,6 +4,7 @@ import * as W from './week.js';
 import * as D from './diary.js';
 import * as G from './grades.js';
 import * as R from './remind.js';
+import * as A from './advise.js';
 
 let state = S.load();
 const root = document.getElementById('app');
@@ -102,7 +103,7 @@ function homePage() {
       const nToday = tasks.filter((t) => L.taskStatus(t, today) === 'today').length;
       const nOver = tasks.filter((t) => L.taskStatus(t, today) === 'overdue').length;
       const avg = L.recentAverage(state.grades.filter((g) => g.childId === c.id), today);
-      const att = L.attention(state, c.id, today);
+      const att = A.attention(state, c.id, today);
       return `<article class="card">
         <a class="card-head" href="#/child/${c.id}/overview">
           <span class="avatar">${esc(c.emoji)}</span>
@@ -180,7 +181,7 @@ function overview(c) {
     </section>
     <section>
       <h3>На что обратить внимание</h3>
-      ${attentionList(L.attention(state, c.id, today), c.id)}
+      ${attentionList(A.attention(state, c.id, today), c.id)}
     </section>
     <section>
       <h3>Успеваемость по предметам</h3>
@@ -755,28 +756,31 @@ function remindSettings() {
 
 // ---------- Подтянуть: рекомендации ----------
 
-const PLAN = 'План на 5 дней по 10–15 минут: 1) вместе разберите ошибки в последней работе; 2) каждый день 5–8 заданий на тему из учебника или рабочей тетради; 3) в конце недели — короткая самопроверка.';
-
 function practiceTab(c) {
-  const weak = W.weakSubjects(state, c.id, L.todayISO());
+  const { cards, more, praise } = A.practiceCards(state, c.id, L.todayISO());
   return `<section>
-      <h3>Что подтянуть <small class="muted">— по данным за 2 недели</small></h3>
+      <h3>Что подтянуть</h3>
       ${
-        weak.length
-          ? weak
+        cards.length
+          ? cards
               .map(
                 (w) => `<div class="item">
           <div class="item-top"><span class="tag">${esc(w.subject)}</span></div>
-          <p class="text">${esc(w.reasons.join('; '))}</p>
-          ${w.topics.length ? `<p class="note">Темы из ваших записей: ${w.topics.map(esc).join(' · ')}</p>` : ''}
-          <p class="note">${PLAN}</p>
+          <p class="text">${esc(w.headline)}</p>
+          <p class="note">${esc(w.plan)}</p>
           <div class="actions"><button class="chip" data-act="goto-grades" data-child="${c.id}" data-subject="${w.subjectId}">Оценки по предмету</button></div>
         </div>`,
               )
               .join('')
-          : '<p class="ok">Явных проблем за последние две недели не видно 👍</p>'
+          : '<p class="ok">Проблем по текущим оценкам не видно 👍</p>'
       }
-    </section>`;
+      ${more.length ? `<p class="muted">Ещё стоит присмотреться: ${more.map(esc).join(', ')}.</p>` : ''}
+    </section>
+    ${
+      praise.length
+        ? `<section><h3>Что получается 👌</h3><p class="ok">${praise.map(esc).join(' · ')}</p></section>`
+        : ''
+    }`;
 }
 
 // ---------- Обработчики ----------

@@ -42,38 +42,7 @@ test('subjectStats: средний балл и тренд', () => {
   assert.equal(st.avg, 4);
   assert.equal(st.trend, -2);
   assert.equal(L.trend(grades.slice(0, 3)), null);
-});
-
-test('attention: просрочка, проверка, низкие оценки, замечания', () => {
-  const state = mk({
-    tasks: [
-      { childId: 'c1', status: 'todo', due: '2026-10-01' },
-      { childId: 'c1', status: 'done', due: '2026-10-05' },
-    ],
-    grades: [{ childId: 'c1', subjectId: 'm', value: 2, date: '2026-10-04' }],
-    remarks: [
-      { childId: 'c1', type: 'negative', date: '2026-10-02' },
-      { childId: 'c1', type: 'negative', date: '2026-10-03' },
-      { childId: 'c1', type: 'positive', date: '2026-10-03' },
-    ],
-  });
-  const items = L.attention(state, 'c1', today);
-  assert.deepEqual(
-    items.map((i) => i.level),
-    ['high', 'high', 'high', 'info'],
-  );
-  assert.match(items.find((i) => i.tab === 'grades').text, /Математика 2 \(04\.10\)/);
-  assert.match(items.find((i) => i.tab === 'remarks').text, /: 2$/);
-});
-
-test('attention: ничего подозрительного', () => {
-  const state = mk({ grades: [{ childId: 'c1', subjectId: 'm', value: 5, date: '2026-10-04' }] });
-  assert.deepEqual(L.attention(state, 'c1', today), []);
-});
-
-test('attention: чужие данные не попадают', () => {
-  const state = mk({ tasks: [{ childId: 'other', status: 'todo', due: '2026-10-01' }] });
-  assert.deepEqual(L.attention(state, 'c1', today), []);
+  assert.equal(L.trend(grades.slice(0, 5)), null); // 5 оценок — мало для тренда
 });
 
 test('dow и расписание', () => {

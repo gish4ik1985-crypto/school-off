@@ -46,8 +46,6 @@ export function plural(n, forms) {
   return forms[2];
 }
 
-const count = (n, forms) => `${n} ${plural(n, forms)}`;
-
 // todo -> done (ребёнок сделал) -> checked (родитель проверил)
 export function taskStatus(task, today) {
   if (task.status === 'checked') return 'checked';
@@ -74,9 +72,10 @@ export function round1(x) {
 
 const byDate = (a, b) => (a.date === b.date ? 0 : a.date < b.date ? -1 : 1);
 
-// Тренд: средняя последних 3 оценок минус средняя предыдущих (до 3). Нужно минимум 4 оценки.
+// Тренд: средняя последних 3 оценок минус средняя предыдущих 3. Нужно минимум 6 оценок:
+// на меньшей выборке «тренд» ловит шум (одна старая пятёрка ≠ снижение).
 export function trend(grades) {
-  if (grades.length < 4) return null;
+  if (grades.length < 6) return null;
   const sorted = [...grades].sort(byDate).map((g) => g.value);
   const last = sorted.slice(-3);
   const prev = sorted.slice(-6, -3);
@@ -101,76 +100,6 @@ export function subjectStats(grades, subjects) {
 export function recentAverage(grades, today, days = 30) {
   const from = addDays(today, -days);
   return round1(average(grades.filter((g) => g.date >= from && g.date <= today).map((g) => g.value)));
-}
-
-// Список "на что обратить внимание" для родителя. level: high | mid | info
-export function attention(state, childId, today) {
-  const out = [];
-  const subjectName = (id) => state.subjects.find((s) => s.id === id)?.name ?? 'Без предмета';
-  const tasks = state.tasks.filter((t) => t.childId === childId);
-  const grades = state.grades.filter((g) => g.childId === childId);
-  const remarks = state.remarks.filter((r) => r.childId === childId);
-  const since = addDays(today, -14);
-
-  const overdue = tasks.filter((t) => taskStatus(t, today) === 'overdue');
-  if (overdue.length) {
-    out.push({
-      level: 'high',
-      tab: 'tasks',
-      text: `Просрочено: ${count(overdue.length, ['задание', 'задания', 'заданий'])}`,
-    });
-  }
-
-  const toCheck = tasks.filter((t) => t.status === 'done');
-  if (toCheck.length) {
-    out.push({
-      level: 'info',
-      tab: 'tasks',
-      text: `Ждут вашей проверки: ${count(toCheck.length, ['задание', 'задания', 'заданий'])}`,
-    });
-  }
-
-  const low = grades.filter((g) => g.date >= since && g.value <= 3).sort(byDate);
-  if (low.length) {
-    const worst = Math.min(...low.map((g) => g.value));
-    const list = low
-      .slice(-3)
-      .map((g) => `${subjectName(g.subjectId)} ${g.value} (${formatDate(g.date)})`)
-      .join(', ');
-    out.push({
-      level: worst <= 2 ? 'high' : 'mid',
-      tab: 'grades',
-      text: `Низкие оценки за 2 недели: ${list}`,
-    });
-  }
-
-  for (const st of subjectStats(grades, state.subjects)) {
-    if (st.count >= 3 && st.avg !== null && st.avg < 3.5) {
-      out.push({
-        level: 'mid',
-        tab: 'overview',
-        text: `${st.subject.name}: средний балл ${st.avg} — стоит подтянуть`,
-      });
-    } else if (st.trend !== null && st.trend <= -0.5) {
-      out.push({
-        level: 'mid',
-        tab: 'overview',
-        text: `${st.subject.name}: оценки снижаются`,
-      });
-    }
-  }
-
-  const negative = remarks.filter((r) => r.type === 'negative' && r.date >= since);
-  if (negative.length) {
-    out.push({
-      level: negative.length >= 2 ? 'high' : 'mid',
-      tab: 'remarks',
-      text: `Замечаний за 2 недели: ${negative.length}`,
-    });
-  }
-
-  const order = { high: 0, mid: 1, info: 2 };
-  return out.sort((a, b) => order[a.level] - order[b.level]);
 }
 
 // День недели: 1 = понедельник ... 7 = воскресенье

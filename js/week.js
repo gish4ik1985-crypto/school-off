@@ -1,5 +1,5 @@
 // Еженедельная сводка для родителя: чистая логика без DOM.
-import { addDays, dow, formatDate, average, round1, subjectStats, plural } from './logic.js';
+import { addDays, dow, formatDate, average, round1, plural } from './logic.js';
 
 const byDate = (a, b) => (a.date === b.date ? 0 : a.date < b.date ? -1 : 1);
 const inRange = (d, a, b) => d >= a && d <= b;
@@ -42,18 +42,17 @@ export function focusSubjects(state, childId, from, to, today) {
   for (const [sid, arr] of bySubject(negative)) {
     add(sid, arr.length > 1 ? `замечаний: ${arr.length}` : 'замечание');
   }
-  for (const st of subjectStats(allGrades.filter((g) => g.date <= to), state.subjects)) {
-    if (st.count >= 3 && st.avg < 3.5) add(st.subject.id, `средний балл ${st.avg}`);
-    else if (st.trend !== null && st.trend <= -0.5) add(st.subject.id, 'оценки снижаются');
+  // Средний считаем по последним 8 оценкам на конец периода — старые двойки не должны
+  // держать предмет в «слабых» неделями после того, как картина выправилась.
+  for (const s of state.subjects) {
+    const vals = allGrades.filter((g) => g.subjectId === s.id && g.date <= to).sort(byDate).map((g) => g.value);
+    if (vals.length < 3) continue;
+    const avgRecent = round1(average(vals.slice(-8)));
+    if (avgRecent < 3.5) add(s.id, `средний балл ${avgRecent}`);
   }
   return [...acc.entries()]
     .map(([sid, e]) => ({ subjectId: sid, subject: sn(sid), reasons: e.reasons, topics: e.topics }))
     .sort((a, b) => b.reasons.length - a.reasons.length);
-}
-
-// Что подтянуть прямо сейчас: последние две недели
-export function weakSubjects(state, childId, today) {
-  return focusSubjects(state, childId, addDays(today, -14), today, today);
 }
 
 // Сводка за неделю [from, from+6] (пн–вс). today нужен, чтобы отличить «просрочено» от «ещё впереди».
