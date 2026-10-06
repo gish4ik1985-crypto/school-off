@@ -149,3 +149,11 @@ legend { font-size: .9rem; color: var(--muted); padding: 0; margin-bottom: 4px; 
 .lessons li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; background: var(--bg); cursor: pointer; }
 .lessons li b { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: #fff; font-size: .8rem; flex: none; }
 .lessons li > span { flex: 1; }
+
+.weeknav { display: flex; align-items: center; gap: 10px; margin: 12px 0; flex-wrap: wrap; }
+.weeknav strong { flex: 1; text-align: center; }
+.chip:disabled { opacity: .35; cursor: default; }
+.tiles { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 8px; }
+.of { font-size: .9rem; font-weight: 400; }
+.plain { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+a.chip { text-decoration: none; }

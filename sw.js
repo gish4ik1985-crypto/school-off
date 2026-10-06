@@ -1,6 +1,6 @@
 // Network-first: обновления приходят сразу, а без сети приложение открывается из кэша.
-const CACHE = 'school-off-v1';
-const ASSETS = ['./', './index.html', './css/style.css', './js/app.js', './js/logic.js', './js/store.js', './manifest.webmanifest', './icon.svg'];
+const CACHE = 'school-off-v2';
+const ASSETS = ['./', './index.html', './css/style.css', './js/app.js', './js/logic.js', './js/store.js', './js/week.js', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));

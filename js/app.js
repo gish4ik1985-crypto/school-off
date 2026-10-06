@@ -1,5 +1,6 @@
 import * as L from './logic.js';
 import * as S from './store.js';
+import * as W from './week.js';
 
 let state = S.load();
 const root = document.getElementById('app');
@@ -17,6 +18,7 @@ const REMARK_TYPES = {
 };
 const TABS = [
   ['overview', 'Обзор'],
+  ['week', 'Неделя'],
   ['schedule', 'Расписание'],
   ['tasks', 'Задания'],
   ['grades', 'Оценки'],
@@ -38,6 +40,7 @@ const subjectOptions = (selected, withEmpty) =>
 let photoUrls = [];
 let taskFilter = 'active';
 let gradeSubject = '';
+let weekFrom = null; // понедельник выбранной недели; null = текущая
 
 // ---------- Маршрутизация ----------
 
@@ -106,6 +109,7 @@ function homePage() {
           <button class="chip" data-act="task-form" data-child="${c.id}">+ Задание</button>
           <button class="chip" data-act="grade-form" data-child="${c.id}">+ Оценка</button>
           <button class="chip" data-act="remark-form" data-child="${c.id}">+ Замечание</button>
+          <a class="chip" href="#/child/${c.id}/week">📊 Сводка недели</a>
         </div>
       </article>`;
     })
@@ -125,7 +129,7 @@ function childPage(c, tab) {
   const tabs = TABS.map(
     ([k, label]) => `<a class="tab ${k === tab ? 'active' : ''}" href="#/child/${c.id}/${k}">${label}</a>`,
   ).join('');
-  const body = { overview, schedule: scheduleTab, tasks: tasksTab, grades: gradesTab, remarks: remarksTab }[tab] ?? overview;
+  const body = { overview, week: weekTab, schedule: scheduleTab, tasks: tasksTab, grades: gradesTab, remarks: remarksTab }[tab] ?? overview;
   return `<div class="child-head">
       <a href="#/" class="back" aria-label="Назад">←</a>
       <span class="avatar">${esc(c.emoji)}</span>
@@ -192,6 +196,50 @@ function photoStrip(ids) {
   return `<div class="photos">${ids
     .map((id) => `<img class="thumb" data-photo="${id}" data-act="open-photo" alt="Фото" />`)
     .join('')}</div>`;
+}
+
+// --- Сводка за неделю ---
+
+function weekTab(c) {
+  const today = L.todayISO();
+  const cur = W.weekStart(today);
+  weekFrom = weekFrom ?? cur;
+  const s = W.weeklySummary(state, c.id, weekFrom, today);
+  const g = s.grades;
+  const delta = g.avg !== null && g.prevAvg !== null ? Math.round((g.avg - g.prevAvg) * 10) / 10 : null;
+  const arrow = delta === null || delta === 0 ? '' : delta > 0 ? `<span class="up">↑ ${delta}</span>` : `<span class="down">↓ ${Math.abs(delta)}</span>`;
+  const nav = `<div class="weeknav">
+      <button class="chip" data-act="week-shift" data-value="-1" aria-label="Предыдущая неделя">‹</button>
+      <strong>${L.formatDate(s.from)} – ${L.formatDate(s.to)}${weekFrom === cur ? ' <small>эта неделя</small>' : ''}</strong>
+      <button class="chip" data-act="week-shift" data-value="1" aria-label="Следующая неделя" ${weekFrom >= cur ? 'disabled' : ''}>›</button>
+      ${weekFrom === cur ? '' : '<button class="chip" data-act="week-now">К текущей</button>'}
+    </div>`;
+  if (s.empty) {
+    return `${nav}<p class="muted">За эту неделю нет записей. Добавьте задания, оценки или замечания — и здесь появится сводка.</p>`;
+  }
+  const t = s.tasks;
+  const r = s.remarks;
+  const list = (items) => `<ul class="plain">${items.map((x) => `<li>${x}</li>`).join('')}</ul>`;
+  const good = [
+    ...(g.fives ? [`Пятёрок за неделю: ${g.fives}`] : []),
+    ...(t.total && t.finished === t.total ? ['Все задания недели выполнены'] : []),
+    ...r.positive.map((x) => `Похвала ${L.formatDate(x.date)}: ${esc(x.text)}`),
+  ];
+  const bad = [
+    ...t.missed.map((x) => `Не сдано: ${esc(x.subject)} — ${esc(x.text)} (срок ${L.formatDate(x.due)})`),
+    ...g.list.filter((x) => x.value <= 3).map((x) => `Оценка ${x.value}: ${esc(x.subject)} (${esc(x.kind)}, ${L.formatDate(x.date)})`),
+    ...r.negative.map((x) => `Замечание ${L.formatDate(x.date)}${x.subject ? ` (${esc(x.subject)})` : ''}: ${esc(x.text)}`),
+  ];
+  return `${nav}
+    <div class="stats tiles">
+      <div><b>${t.finished}<small class="of">/${t.total}</small></b><small>заданий сделано</small></div>
+      <div><b>${g.avg ?? '—'}</b><small>средний балл ${arrow}</small></div>
+      <div class="${r.negative.length ? 'warn' : ''}"><b>${r.negative.length}</b><small>замечаний${r.positive.length ? `, похвал: ${r.positive.length}` : ''}</small></div>
+    </div>
+    <section><h3>Что получилось 👍</h3>${good.length ? list(good) : '<p class="muted">Пока ничего особенного.</p>'}</section>
+    <section><h3>Что тревожит</h3>${bad.length ? list(bad) : '<p class="ok">Ничего тревожного.</p>'}</section>
+    <section><h3>Что делать дальше</h3>${s.tips.length ? list(s.tips.map(esc)) : '<p class="muted">—</p>'}</section>
+    <div class="actions"><button class="btn" data-act="copy-summary" data-id="${c.id}">📋 Скопировать текст для отправки</button></div>`;
 }
 
 // --- Расписание ---
@@ -593,6 +641,18 @@ document.addEventListener('click', async (e) => {
     case 'task-form': openForm('task', { id, childId: child }); break;
     case 'grade-form': openForm('grade', { id, childId: child }); break;
     case 'remark-form': openForm('remark', { id, childId: child }); break;
+    case 'week-shift': weekFrom = L.addDays(weekFrom ?? W.weekStart(L.todayISO()), 7 * Number(value)); render(); break;
+    case 'week-now': weekFrom = null; render(); break;
+    case 'copy-summary': {
+      const text = W.summaryText(W.weeklySummary(state, id, weekFrom ?? W.weekStart(L.todayISO()), L.todayISO()), childById(id).name);
+      try {
+        await navigator.clipboard.writeText(text);
+        el.textContent = '✓ Скопировано';
+      } catch {
+        prompt('Скопируйте текст:', text);
+      }
+      break;
+    }
     case 'lesson-form': openForm('lesson', { id, childId: child, day: el.dataset.day }); break;
     case 'delete-entry': await deleteEntry(); break;
     case 'close-dialog': form?.pending?.forEach((p) => URL.revokeObjectURL(p.url)); form = null; dlg.close(); break;
